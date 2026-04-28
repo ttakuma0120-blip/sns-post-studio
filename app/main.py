@@ -1,20 +1,28 @@
 import os
 import re
+import json
 import streamlit as st
 import anthropic
 
-STYLE_FILE = os.path.join(os.path.dirname(__file__), "style_config.txt")
+# ── Data management ─────────────────────────────────────────────────────────────
+DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
+os.makedirs(DATA_DIR, exist_ok=True)
 
-def load_style():
-    if os.path.exists(STYLE_FILE):
-        with open(STYLE_FILE, "r", encoding="utf-8") as f:
-            return f.read()
-    return ""
+def _safe(code: str) -> str:
+    return re.sub(r'[^\w\-]', '_', code)
 
-def save_style(text):
-    with open(STYLE_FILE, "w", encoding="utf-8") as f:
-        f.write(text)
+def load_shop_data(code: str) -> dict:
+    path = os.path.join(DATA_DIR, f"{_safe(code)}.json")
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {"shop_name": "", "styles": {}, "active_style": ""}
 
+def save_shop_data(code: str, data: dict):
+    with open(os.path.join(DATA_DIR, f"{_safe(code)}.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# ── Page config ─────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="SNS Post Studio｜飲食店専用",
     page_icon="✦",
@@ -137,7 +145,7 @@ html, body, [class*="css"] {
 }
 .stRadio label:hover { border-color: var(--gold) !important; }
 
-/* ── Learn badge ── */
+/* ── Badges ── */
 .learn-badge {
     display: inline-flex;
     align-items: center;
@@ -148,7 +156,17 @@ html, body, [class*="css"] {
     color: var(--green);
     font-size: 0.75rem;
     padding: 4px 12px;
-    margin-top: 8px;
+}
+.code-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--gold-dim);
+    border: 1px solid rgba(201,168,76,0.3);
+    border-radius: 20px;
+    color: var(--gold);
+    font-size: 0.75rem;
+    padding: 4px 12px;
 }
 
 /* ── Output ── */
@@ -185,22 +203,61 @@ hr { border-color: var(--border) !important; }
 """, unsafe_allow_html=True)
 
 # ── Session state ──────────────────────────────────────────────────────────────
-if "past_posts" not in st.session_state:
-    st.session_state.past_posts = load_style()
+if "shop_code" not in st.session_state:
+    st.session_state.shop_code = ""
+if "shop_data" not in st.session_state:
+    st.session_state.shop_data = {}
 if "result" not in st.session_state:
     st.session_state.result = ""
-if "editing_style" not in st.session_state:
-    st.session_state.editing_style = False
+if "adding_style" not in st.session_state:
+    st.session_state.adding_style = False
+
+# ── Shop code gate ─────────────────────────────────────────────────────────────
+if not st.session_state.shop_code:
+    st.markdown("""
+    <div class="studio-header">
+      <div class="studio-eyebrow">✦ Restaurant SNS Studio</div>
+      <div class="studio-title">ショップコードを入力</div>
+      <p class="studio-sub">あなた専用のデータを呼び出します<br>初回は好きなコードを決めて入力してください</p>
+      <div class="studio-line"></div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    code_input = st.text_input(
+        "ショップコード",
+        placeholder="例：marumaru や ramen01 など（半角英数字推奨）",
+        label_visibility="collapsed",
+    )
+    if st.button("✦ スタート", type="primary", use_container_width=False):
+        if code_input.strip():
+            st.session_state.shop_code = code_input.strip()
+            st.session_state.shop_data = load_shop_data(code_input.strip())
+            st.rerun()
+        else:
+            st.warning("コードを入力してください")
+    st.caption("⚠️ このコードはあなただけが知るパスワードです。忘れないようにメモしてください。")
+    st.stop()
+
+# ── Load shop data ─────────────────────────────────────────────────────────────
+shop_data: dict = st.session_state.shop_data
 
 # ── Header ─────────────────────────────────────────────────────────────────────
-st.markdown("""
-<div class="studio-header">
-  <div class="studio-eyebrow">✦ Restaurant SNS Studio</div>
-  <div class="studio-title">あなたの"声"で書く<br>SNS投稿を、AIが。</div>
-  <p class="studio-sub">過去の投稿を学習させて、あなたらしい文体をそのまま再現</p>
-  <div class="studio-line"></div>
-</div>
-""", unsafe_allow_html=True)
+col_h, col_badge = st.columns([5, 1])
+with col_h:
+    st.markdown("""
+    <div class="studio-header" style="padding: 32px 0 28px; text-align:left;">
+      <div class="studio-eyebrow">✦ Restaurant SNS Studio</div>
+      <div class="studio-title" style="font-size:2rem;">あなたの"声"で書く<br>SNS投稿を、AIが。</div>
+      <div class="studio-line" style="margin:20px 0 0;"></div>
+    </div>
+    """, unsafe_allow_html=True)
+with col_badge:
+    st.markdown(f'<div style="padding-top:40px;"><div class="code-badge">✦ {st.session_state.shop_code}</div></div>', unsafe_allow_html=True)
+    if st.button("ログアウト", key="logout"):
+        st.session_state.shop_code = ""
+        st.session_state.shop_data = {}
+        st.session_state.result = ""
+        st.rerun()
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 PLATFORM_SPEC = {
@@ -313,33 +370,56 @@ def build_prompt(genre, shop_name, target, menu, extra, goal, platform, tone, pa
 投稿文を出力してください："""
 
 
-# ── Step 01 ────────────────────────────────────────────────────────────────────
-st.markdown('<div class="block"><div class="block-title">Step 01 ── 文体の学習（任意・推奨）</div>', unsafe_allow_html=True)
+# ── Step 01 ── 文体プロフィール ────────────────────────────────────────────────
+st.markdown('<div class="block"><div class="block-title">Step 01 ── 文体プロフィール（任意・推奨）</div>', unsafe_allow_html=True)
 
-past_posts = st.session_state.past_posts
+styles: dict = shop_data.get("styles", {})
+active_style: str = shop_data.get("active_style", "")
 
-if past_posts.strip() and not st.session_state.editing_style:
-    # 設定済み：バッジ表示 + 変更ボタン
-    count_brackets = len(re.findall(r'【', past_posts))
-    count_paragraphs = len([p for p in past_posts.split('\n\n') if p.strip()])
-    estimated_count = max(count_brackets, count_paragraphs, 1)
-    char_count = len(past_posts)
-    st.markdown(
-        f'<div class="learn-badge">✓ 文体を学習済み ── 約{estimated_count}件 / {char_count}文字を分析</div>',
-        unsafe_allow_html=True,
-    )
-    col_a, col_b = st.columns([2, 1])
-    with col_a:
-        st.caption("アプリを再起動しても文体設定は保持されます")
-    with col_b:
-        if st.button("変更する", use_container_width=True):
-            st.session_state.editing_style = True
-            st.rerun()
+if not st.session_state.adding_style:
+    if styles:
+        style_names = list(styles.keys())
+        # ラジオで選択
+        selected_style = st.radio(
+            "使用する文体",
+            style_names,
+            index=style_names.index(active_style) if active_style in style_names else 0,
+            label_visibility="collapsed",
+        )
+        # 選択が変わったら保存
+        if selected_style != shop_data.get("active_style"):
+            shop_data["active_style"] = selected_style
+            save_shop_data(st.session_state.shop_code, shop_data)
+            st.session_state.shop_data = shop_data
+
+        # 選択中の文体の情報 + 削除ボタン
+        char_count = len(styles[selected_style])
+        col_badge, col_del = st.columns([4, 1])
+        with col_badge:
+            st.markdown(
+                f'<div class="learn-badge">✓ {selected_style} ── {char_count}文字を学習済み</div>',
+                unsafe_allow_html=True,
+            )
+        with col_del:
+            if st.button("🗑️ 削除", key="del_style"):
+                del shop_data["styles"][selected_style]
+                remaining = list(shop_data["styles"].keys())
+                shop_data["active_style"] = remaining[0] if remaining else ""
+                save_shop_data(st.session_state.shop_code, shop_data)
+                st.session_state.shop_data = shop_data
+                st.rerun()
+    else:
+        st.caption("※ 文体未登録。追加するとあなたのお店らしい文体で生成できます")
+        selected_style = ""
+
+    if st.button("＋ 新しい文体を追加", use_container_width=True):
+        st.session_state.adding_style = True
+        st.rerun()
 else:
-    # 未設定 or 編集中：テキストエリアを表示
-    draft = st.text_area(
+    # 新規追加フォーム
+    new_name = st.text_input("文体の名前", placeholder="例：通常投稿、ランチ用、夜営業用")
+    new_text = st.text_area(
         "過去に投稿したSNS文をここに貼ってください（3〜10件が理想）",
-        value=past_posts,
         height=180,
         placeholder="""例）
 【1件目】
@@ -353,23 +433,30 @@ else:
 こってり系好きの方、必見です🔥
 夜21時まで営業してます〜""",
     )
-    col_a, col_b = st.columns([1, 1])
+    col_a, col_b = st.columns(2)
     with col_a:
-        if st.button("💾 文体を保存する", type="primary", use_container_width=True):
-            save_style(draft)
-            st.session_state.past_posts = draft
-            st.session_state.editing_style = False
-            st.rerun()
+        if st.button("💾 保存する", type="primary", use_container_width=True):
+            if new_name.strip() and new_text.strip():
+                shop_data["styles"][new_name.strip()] = new_text.strip()
+                shop_data["active_style"] = new_name.strip()
+                save_shop_data(st.session_state.shop_code, shop_data)
+                st.session_state.shop_data = shop_data
+                st.session_state.adding_style = False
+                st.rerun()
+            else:
+                st.warning("名前と投稿文を両方入力してください")
     with col_b:
-        if past_posts.strip() and st.button("キャンセル", use_container_width=True):
-            st.session_state.editing_style = False
+        if st.button("キャンセル", use_container_width=True):
+            st.session_state.adding_style = False
             st.rerun()
-    if not draft.strip():
-        st.caption("※ 未入力の場合はプロのSNSライター文体で生成します")
+
+# 選択中の文体テキストを past_posts として以降で使用
+active_style_name = shop_data.get("active_style", "")
+past_posts = shop_data.get("styles", {}).get(active_style_name, "")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Step 02 ────────────────────────────────────────────────────────────────────
+# ── Step 02 ── お店の情報 ──────────────────────────────────────────────────────
 st.markdown('<div class="block"><div class="block-title">Step 02 ── お店の情報</div>', unsafe_allow_html=True)
 
 col1, col2 = st.columns(2)
@@ -381,11 +468,21 @@ with col1:
          "定食・食堂", "スイーツ・ケーキ", "パン・ベーカリー", "その他"],
     )
 with col2:
-    shop_name = st.text_input(
-        "お店の名前（任意）",
+    saved_name = shop_data.get("shop_name", "")
+    shop_name_input = st.text_input(
+        "お店の名前",
+        value=saved_name,
         placeholder="例：麺処 まるや",
-        help="自然に文中に組み込まれます",
+        help="保存ボタンで次回から自動入力されます",
     )
+    if shop_name_input != saved_name:
+        if st.button("💾 名前を保存", key="save_name"):
+            shop_data["shop_name"] = shop_name_input
+            save_shop_data(st.session_state.shop_code, shop_data)
+            st.session_state.shop_data = shop_data
+            st.rerun()
+
+shop_name = shop_name_input
 
 target = st.selectbox(
     "ターゲット客層",
@@ -395,7 +492,7 @@ target = st.selectbox(
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Step 03 ────────────────────────────────────────────────────────────────────
+# ── Step 03 ── 今日の投稿内容 ──────────────────────────────────────────────────
 st.markdown('<div class="block"><div class="block-title">Step 03 ── 今日の投稿内容</div>', unsafe_allow_html=True)
 
 menu = st.text_area(
@@ -424,7 +521,7 @@ with col2:
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-# ── Step 04 ────────────────────────────────────────────────────────────────────
+# ── Step 04 ── 投稿先 & スタイル ───────────────────────────────────────────────
 st.markdown('<div class="block"><div class="block-title">Step 04 ── 投稿先 & スタイル</div>', unsafe_allow_html=True)
 
 selected_platform = st.radio(
@@ -438,7 +535,7 @@ if not past_posts.strip():
     tone = st.selectbox("文体スタイル", list(TONE_SPEC.keys()))
 else:
     tone = None
-    st.caption("✓ 文体は過去投稿から自動学習します")
+    st.caption(f"✓ 文体「{active_style_name}」から自動学習します")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
@@ -448,15 +545,10 @@ api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
 # ── Buttons ─────────────────────────────────────────────────────────────────────
 col_gen, col_reset = st.columns([3, 1])
 with col_gen:
-    generate = st.button(
-        "✦ 投稿文を生成する",
-        type="primary",
-        use_container_width=True,
-    )
+    generate = st.button("✦ 投稿文を生成する", type="primary", use_container_width=True)
 with col_reset:
     if st.button("リセット", use_container_width=True):
         st.session_state.result = ""
-        st.session_state.past_posts = ""
         st.rerun()
 
 # ── Generation ──────────────────────────────────────────────────────────────────
@@ -467,15 +559,9 @@ if generate:
         st.error("APIキーが設定されていません。管理者にお問い合わせください。")
     else:
         prompt = build_prompt(
-            genre=genre,
-            shop_name=shop_name,
-            target=target,
-            menu=menu,
-            extra=extra,
-            goal=goal,
-            platform=selected_platform,
-            tone=tone,
-            past_posts=past_posts,
+            genre=genre, shop_name=shop_name, target=target,
+            menu=menu, extra=extra, goal=goal,
+            platform=selected_platform, tone=tone, past_posts=past_posts,
         )
         with st.spinner("生成中..."):
             try:
@@ -519,17 +605,10 @@ if st.session_state.result:
         unsafe_allow_html=True,
     )
 
-    result = st.text_area(
-        "output",
-        value=st.session_state.result,
-        height=380,
-        label_visibility="collapsed",
-    )
+    st.text_area("output", value=st.session_state.result, height=380, label_visibility="collapsed")
 
     if selected_platform == "X（旧Twitter）" and result_len > 140:
-        st.warning(
-            f"X（旧Twitter）は140字以内が推奨です。現在 {result_len} 字（{result_len - 140} 字超過）"
-        )
+        st.warning(f"X（旧Twitter）は140字以内が推奨です。現在 {result_len} 字（{result_len - 140} 字超過）")
 
     col1, col2, col3 = st.columns(3)
     with col1:
