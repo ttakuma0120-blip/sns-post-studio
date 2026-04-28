@@ -451,7 +451,6 @@ with col_gen:
         "✦ 投稿文を生成する",
         type="primary",
         use_container_width=True,
-        disabled=not menu.strip(),
     )
 with col_reset:
     if st.button("リセット", use_container_width=True):
@@ -462,7 +461,7 @@ with col_reset:
 # ── Generation ──────────────────────────────────────────────────────────────────
 if generate:
     if not menu.strip():
-        st.warning("伝えたいこと・おすすめメニューを入力してください")
+        st.warning("⚠️ Step 03「伝えたいこと・おすすめメニュー」を入力してください")
     elif not api_key:
         st.error("APIキーが設定されていません。管理者にお問い合わせください。")
     else:
