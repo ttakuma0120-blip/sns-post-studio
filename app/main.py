@@ -442,9 +442,7 @@ else:
 st.markdown('</div>', unsafe_allow_html=True)
 
 # ── API Key ─────────────────────────────────────────────────────────────────────
-with st.expander("🔑 Claude APIキーを設定"):
-    api_key = st.text_input("APIキー", type="password", label_visibility="collapsed")
-    st.caption("このセッション内でのみ使用され、サーバーには保存されません")
+api_key = st.secrets.get("ANTHROPIC_API_KEY", "")
 
 # ── Buttons ─────────────────────────────────────────────────────────────────────
 col_gen, col_reset = st.columns([3, 1])
@@ -466,7 +464,7 @@ if generate:
     if not menu.strip():
         st.warning("伝えたいこと・おすすめメニューを入力してください")
     elif not api_key:
-        st.warning("Claude APIキーを入力してください")
+        st.error("APIキーが設定されていません。管理者にお問い合わせください。")
     else:
         prompt = build_prompt(
             genre=genre,
