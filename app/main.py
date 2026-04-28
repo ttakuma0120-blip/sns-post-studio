@@ -211,6 +211,8 @@ if "result" not in st.session_state:
     st.session_state.result = ""
 if "adding_style" not in st.session_state:
     st.session_state.adding_style = False
+if "editing_style_name" not in st.session_state:
+    st.session_state.editing_style_name = ""
 
 # ── Shop code gate ─────────────────────────────────────────────────────────────
 if not st.session_state.shop_code:
@@ -376,52 +378,7 @@ st.markdown('<div class="block"><div class="block-title">Step 01 ── 文体�
 styles: dict = shop_data.get("styles", {})
 active_style: str = shop_data.get("active_style", "")
 
-if not st.session_state.adding_style:
-    if styles:
-        style_names = list(styles.keys())
-        # ラジオで選択
-        selected_style = st.radio(
-            "使用する文体",
-            style_names,
-            index=style_names.index(active_style) if active_style in style_names else 0,
-            label_visibility="collapsed",
-        )
-        # 選択が変わったら保存
-        if selected_style != shop_data.get("active_style"):
-            shop_data["active_style"] = selected_style
-            save_shop_data(st.session_state.shop_code, shop_data)
-            st.session_state.shop_data = shop_data
-
-        # 選択中の文体の情報 + 削除ボタン
-        char_count = len(styles[selected_style])
-        col_badge, col_del = st.columns([4, 1])
-        with col_badge:
-            st.markdown(
-                f'<div class="learn-badge">✓ {selected_style} ── {char_count}文字を学習済み</div>',
-                unsafe_allow_html=True,
-            )
-        with col_del:
-            if st.button("🗑️ 削除", key="del_style"):
-                del shop_data["styles"][selected_style]
-                remaining = list(shop_data["styles"].keys())
-                shop_data["active_style"] = remaining[0] if remaining else ""
-                save_shop_data(st.session_state.shop_code, shop_data)
-                st.session_state.shop_data = shop_data
-                st.rerun()
-    else:
-        st.caption("※ 文体未登録。追加するとあなたのお店らしい文体で生成できます")
-        selected_style = ""
-
-    if st.button("＋ 新しい文体を追加", use_container_width=True):
-        st.session_state.adding_style = True
-        st.rerun()
-else:
-    # 新規追加フォーム
-    new_name = st.text_input("文体の名前", placeholder="例：通常投稿、ランチ用、夜営業用")
-    new_text = st.text_area(
-        "過去に投稿したSNS文をここに貼ってください（3〜10件が理想）",
-        height=180,
-        placeholder="""例）
+STYLE_PLACEHOLDER = """例）
 【1件目】
 本日も元気に営業中です🍜
 今日のおすすめは「濃厚醤油ラーメン」！
@@ -431,7 +388,68 @@ else:
 【2件目】
 寒い日はやっぱりここ！
 こってり系好きの方、必見です🔥
-夜21時まで営業してます〜""",
+夜21時まで営業してます〜"""
+
+if not st.session_state.adding_style and not st.session_state.editing_style_name:
+    # ── 通常表示 ──
+    if styles:
+        style_names = list(styles.keys())
+        selected_style = st.radio(
+            "使用する文体",
+            style_names,
+            index=style_names.index(active_style) if active_style in style_names else 0,
+            label_visibility="collapsed",
+        )
+        if selected_style != shop_data.get("active_style"):
+            shop_data["active_style"] = selected_style
+            save_shop_data(st.session_state.shop_code, shop_data)
+            st.session_state.shop_data = shop_data
+
+        char_count = len(styles[selected_style])
+        col_badge, col_edit, col_del = st.columns([3, 1, 1])
+        with col_badge:
+            st.markdown(
+                f'<div class="learn-badge">✓ {selected_style} ── {char_count}文字</div>',
+                unsafe_allow_html=True,
+            )
+        with col_edit:
+            if st.button("✏️ 編集", key="edit_style", use_container_width=True):
+                st.session_state.editing_style_name = selected_style
+                st.rerun()
+        with col_del:
+            if st.button("🗑️ 削除", key="del_style", use_container_width=True):
+                del shop_data["styles"][selected_style]
+                remaining = list(shop_data["styles"].keys())
+                shop_data["active_style"] = remaining[0] if remaining else ""
+                save_shop_data(st.session_state.shop_code, shop_data)
+                st.session_state.shop_data = shop_data
+                st.rerun()
+
+        # プレビュー
+        with st.expander("👁 登録済みの投稿サンプルを確認する"):
+            st.text_area(
+                "preview",
+                value=styles[selected_style],
+                height=200,
+                disabled=True,
+                label_visibility="collapsed",
+            )
+    else:
+        st.caption("※ 文体未登録。追加するとあなたのお店らしい文体で生成できます")
+        selected_style = ""
+
+    if st.button("＋ 新しい文体を追加", use_container_width=True):
+        st.session_state.adding_style = True
+        st.rerun()
+
+elif st.session_state.adding_style:
+    # ── 新規追加フォーム ──
+    st.caption("新しい文体を追加")
+    new_name = st.text_input("文体の名前", placeholder="例：通常投稿、ランチ用、夜営業用")
+    new_text = st.text_area(
+        "過去に投稿したSNS文をここに貼ってください（3〜10件が理想）",
+        height=180,
+        placeholder=STYLE_PLACEHOLDER,
     )
     col_a, col_b = st.columns(2)
     with col_a:
@@ -448,6 +466,36 @@ else:
     with col_b:
         if st.button("キャンセル", use_container_width=True):
             st.session_state.adding_style = False
+            st.rerun()
+
+else:
+    # ── 編集フォーム ──
+    editing_name = st.session_state.editing_style_name
+    st.caption(f"「{editing_name}」を編集中")
+    edit_name = st.text_input("文体の名前", value=editing_name)
+    edit_text = st.text_area(
+        "投稿サンプル",
+        value=styles.get(editing_name, ""),
+        height=220,
+        placeholder=STYLE_PLACEHOLDER,
+    )
+    col_a, col_b = st.columns(2)
+    with col_a:
+        if st.button("💾 変更を保存", type="primary", use_container_width=True):
+            if edit_name.strip() and edit_text.strip():
+                if edit_name.strip() != editing_name:
+                    del shop_data["styles"][editing_name]
+                shop_data["styles"][edit_name.strip()] = edit_text.strip()
+                shop_data["active_style"] = edit_name.strip()
+                save_shop_data(st.session_state.shop_code, shop_data)
+                st.session_state.shop_data = shop_data
+                st.session_state.editing_style_name = ""
+                st.rerun()
+            else:
+                st.warning("名前と投稿文を両方入力してください")
+    with col_b:
+        if st.button("キャンセル", use_container_width=True):
+            st.session_state.editing_style_name = ""
             st.rerun()
 
 # 選択中の文体テキストを past_posts として以降で使用
